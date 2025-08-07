@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/Projects/style.css" rel="stylesheet">
+    <title>Calculator</title>
+</head>
+<body>
+        <Header class="Header" id="Header">
+            <Nav class="nav" id="nav">
+                <p class="text-logo" id="text-logo"><a class="logo" href="#">Calculator</a></p>
+                <ul class="l-container" id="l-container">
+                    <li><a href="http://127.0.0.1:3002/index.html" class="ali">Home</a></li>
+                    <li><a href="http://127.0.0.1:3002/index.html" class="ali">Projects</a></li>
+                    <li><a href="http://127.0.0.1:3002/index.html" class="ali">Contact</a></li>
+                </ul>
+            </Nav>
+        </Header>
+    <main class="mn">
+        <h1 class="mnh" id="mnh">Simple Calculator</h1>
+        <p>We have a Calculator which calculates everthing all the simple and big calcuation.</p>
+    </main>
+    <section class="section" id="section">
+        <div class="container">
+            <input type="text" readonly id="display">
+            <div class="buttons">
+                 <button class="button">/</button>
+                 <button class="button">*</button>
+                 <button class="button">-</button>
+                 <button class="button">+</button>
+
+                 <button class="button">7</button>
+                 <button class="button">8</button>
+                 <button class="button">9</button>
+                 <button class="button">%</button>
+
+                 <button class="button">4</button>
+                 <button class="button">5</button>
+                 <button class="button">6</button>
+                 <button class="button">cls</button>
+
+                 <button class="button">1</button>
+                 <button class="button">2</button>
+                 <button class="button">3</button>
+                 <button class="button">=</button>
+            </div>
+        </div>
+    </section>
+    <script>
+    const display = document.getElementById("display");
+    const buttons = document.querySelectorAll(".button");
+
+    let currentInput = "";
+
+    buttons.forEach(button => {
+        button.addEventListener("click", () => {
+            const value = button.textContent;
+
+            if (value === "cls") {
+                currentInput = "";
+            } else if (value === "=") {
+                try {
+                    // Evaluate expression safely
+                    currentInput = eval(currentInput).toString();
+                } catch {
+                    currentInput = "Error";
+                }
+            } else {
+                currentInput += value;
+            }
+
+            display.value = currentInput;
+        });
+    });
+    </script>
+</body>
+</html>
