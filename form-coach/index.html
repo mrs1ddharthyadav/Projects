@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Live Form Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+/* Layout: setup screen (pick exercise, camera tips) -> live screen (camera with skeleton, cue bar, rule checklist) -> summary. Same kinesiology-tape palette as Form Fixer. */
+:root{
+  --bg:#F2F4F3; --surface:#FFFFFF; --ink:#18211F; --muted:#5A6764; --line:#D5DCDA;
+  --accent:#1C74AE; --accent-ink:#FFFFFF; --accent-soft:#E2EEF6;
+  --good:#1F8A4C; --good-soft:#E1F3E8; --bad:#D9472F; --bad-soft:#FBE6E1; --warn:#B26A00; --warn-soft:#FBEFD9;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",Roboto,Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#121816; --surface:#1B2321; --ink:#E7ECEA; --muted:#9AA7A3; --line:#2F3A37;
+  --accent:#4FA6DD; --accent-ink:#0D1A22; --accent-soft:#1B3242;
+  --good:#5FC488; --good-soft:#163323; --bad:#F06A52; --bad-soft:#3A201B; --warn:#E6A24A; --warn-soft:#352812;
+  color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+[hidden]{display:none!important}
+.wrap{max-width:980px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
+h1{font-family:var(--display);font-weight:700;font-size:2.4rem;line-height:1.05;margin:0;text-wrap:balance}
+h2{font-family:var(--display);font-weight:700;font-size:1.35rem;margin:0}
+.lede{margin:6px 0 0;color:var(--muted);max-width:62ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.exgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.ex{appearance:none;text-align:left;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:2px;font-family:var(--body)}
+.ex b{font-family:var(--display);font-size:1.2rem;letter-spacing:.01em}
+.ex span{font-size:.85rem;color:var(--muted)}
+.ex:hover{border-color:var(--accent)}
+.ex[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.tips{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+@media (max-width:620px){.tips{grid-template-columns:1fr}}
+.tips svg{width:220px;max-width:100%;height:auto}
+.tips ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{appearance:none;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font:600 1rem var(--body);padding:10px 16px;border-radius:6px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-size:1.1rem;padding:12px 22px}
+.btn.danger{border-color:var(--bad);color:var(--bad)}
+.btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.note{font-size:.9rem;color:var(--muted)}
+.err{background:var(--bad-soft);border-left:4px solid var(--bad);padding:10px 14px;border-radius:4px}
+
+/* live */
+#live{display:flex;flex-direction:column;gap:12px}
+.topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.topbar h2{font-size:1.6rem}
+.stats{display:flex;gap:16px;font-variant-numeric:tabular-nums}
+.stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+.stat b{font-family:var(--display);font-size:2rem}
+.stat span{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stat.good b{color:var(--good)}
+.livegrid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
+@media (max-width:820px){.livegrid{grid-template-columns:1fr}}
+.stagebox{display:flex;justify-content:center;background:#000;border-radius:10px;overflow:hidden;min-width:0}
+.stage{position:relative}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%}
+.stage.mirror video,.stage.mirror canvas{transform:scaleX(-1)}
+.cue{position:absolute;left:10px;right:10px;top:10px;padding:10px 14px;border-radius:8px;font:700 1.25rem var(--body);line-height:1.25;background:rgba(15,20,19,.82);color:#fff;border-left:6px solid #888;text-wrap:balance}
+.cue.good{border-left-color:#4FD38A}
+.cue.bad{border-left-color:#FF6B52;background:rgba(80,18,10,.88)}
+.cue.info{border-left-color:#7DB9E8}
+.loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;text-align:center;padding:20px}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.rules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.rules li{display:grid;grid-template-columns:14px 1fr;gap:10px;align-items:start;font-size:.95rem}
+.dot{width:14px;height:14px;border-radius:50%;margin-top:4px;background:var(--line)}
+.dot.ok{background:var(--good)}
+.dot.bad{background:var(--bad)}
+.rules li.bad{font-weight:700;color:var(--bad)}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:.9rem;max-height:220px;overflow:auto}
+.log li{display:flex;gap:8px;align-items:baseline}
+.log .n{font-variant-numeric:tabular-nums;color:var(--muted);min-width:3.5em}
+.log .g{color:var(--good);font-weight:700}
+.log .b{color:var(--bad);font-weight:700}
+.keyangle{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
+
+/* summary */
+.sumgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.sum{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column}
+.sum b{font-family:var(--display);font-size:2.2rem;line-height:1;font-variant-numeric:tabular-nums}
+.sum span{font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.mist{border-left:4px solid var(--bad);background:var(--bad-soft);padding:12px 14px;border-radius:4px;display:flex;flex-direction:column;gap:4px}
+.mist h3{margin:0;font-size:1.05rem}
+.mist p{margin:0}
+.allgood{border-left:4px solid var(--good);background:var(--good-soft);padding:12px 14px;border-radius:4px}
+.foot{color:var(--muted);font-size:.85rem;max-width:70ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section id="setup" class="wrap" style="padding:0">
+  <header>
+    <h1>Live Form Coach</h1>
+    <p class="lede">Your camera watches your body while you exercise. It checks your posture on every rep, says out loud what to fix, and counts good and bad reps. Video stays on your device and is never uploaded.</p>
+  </header>
+
+  <div class="panel">
+    <h2>1. Pick your exercise</h2>
+    <div class="exgrid" id="exGrid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>2. Set up your camera</h2>
+    <div class="tips">
+      <svg id="setupSvg" viewBox="0 0 220 120" aria-hidden="true"></svg>
+      <ol id="tipList"></ol>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>3. Start</h2>
+    <div class="row">
+      <button class="btn" id="camFront" aria-pressed="true">Front camera</button>
+      <button class="btn" id="camBack" aria-pressed="false">Back camera</button>
+      <button class="btn" id="voiceBtn" aria-pressed="true">Voice coach on</button>
+    </div>
+    <div class="row"><button class="btn primary" id="startBtn">Start live check</button></div>
+    <p class="note">Your browser will ask for camera permission. The first start downloads the body-tracking model (about 6 MB), so it needs internet once.</p>
+    <div class="err" id="setupErr" hidden></div>
+  </div>
+  <p class="foot">This checks body angles, not injuries. If something hurts sharply, stop and see a doctor or physiotherapist.</p>
+</section>
+
+<section id="live" hidden>
+  <div class="topbar">
+    <h2 id="liveTitle">Knee push-ups</h2>
+    <div class="stats">
+      <div class="stat good"><b id="goodN">0</b><span>Good</span></div>
+      <div class="stat"><b id="repN">0</b><span id="repLabel">Reps</span></div>
+    </div>
+  </div>
+  <div class="livegrid">
+    <div class="stagebox" id="stageBox">
+      <div class="stage mirror" id="stage">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="cue info" id="cue">Starting camera</div>
+        <div class="loading" id="loading">Loading body tracking</div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="panel">
+        <h2>Form checks</h2>
+        <ul class="rules" id="ruleList"></ul>
+        <div class="keyangle" id="keyAngle"></div>
+      </div>
+      <div class="panel">
+        <h2>Rep log</h2>
+        <ul class="log" id="repLog"><li class="note">Reps appear here as you do them.</li></ul>
+      </div>
+      <div class="row">
+        <button class="btn" id="flipBtn">Switch camera</button>
+        <button class="btn" id="voiceBtn2" aria-pressed="true">Voice on</button>
+        <button class="btn danger" id="stopBtn">Finish</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="summary" hidden>
+  <div class="panel">
+    <h2 id="sumTitle">Workout summary</h2>
+    <div class="sumgrid" id="sumStats"></div>
+    <div id="sumMistakes" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div class="row">
+      <button class="btn primary" id="againBtn">Do another set</button>
+      <button class="btn" id="changeBtn">Change exercise</button>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+/* ===== Pose rules (pure logic, no browser APIs) ===== */
+const LM={nose:0,lear:7,rear:8,ls:11,rs:12,le:13,re:14,lw:15,rw:16,lh:23,rh:24,lk:25,rk:26,la:27,ra:28,lhe:29,rhe:30,lt:31,rt:32};
+function ang(a,b,c){const v1=[a.x-b.x,a.y-b.y],v2=[c.x-b.x,c.y-b.y];const d=Math.hypot(...v1)*Math.hypot(...v2);if(!d)return 180;return Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/d)))*180/Math.PI}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+/* signed vertical offset of p from line a->b, as a fraction of the a-b length; + means p is BELOW the line on screen */
+function offLine(p,a,b){const L=dist(a,b)||1;const dx=b.x-a.x;if(Math.abs(dx)<1e-6)return 0;const t=(p.x-a.x)/dx;const ly=a.y+t*(b.y-a.y);return (p.y-ly)/L}
+function tiltFromVertical(top,bottom){return Math.abs(Math.atan2(top.x-bottom.x,bottom.y-top.y))*180/Math.PI}
+function pickSide(lm){
+  const L=[11,13,15,23,25,27].reduce((s,i)=>s+(lm[i].visibility??1),0),R=[12,14,16,24,26,28].reduce((s,i)=>s+(lm[i].visibility??1),0);
+  return L>=R?"l":"r";
+}
+function pts(lm,side){
+  const s=side==="l";const g=i=>lm[i];
+  return {S:g(s?11:12),E:g(s?13:14),W:g(s?15:16),H:g(s?23:24),K:g(s?25:26),A:g(s?27:28),He:g(s?29:30),T:g(s?31:32),Ear:g(s?7:8),Nose:g(0),
+    S2:g(s?12:11),H2:g(s?24:23),K2:g(s?26:25),A2:g(s?28:27),T2:g(s?32:31),
+    lK:g(25),rK:g(26),lA:g(27),rA:g(28),lS:g(11),rS:g(12),lH:g(23),rH:g(24)};
+}
+function facingCamera(P){const sw=dist(P.lS,P.rS),tl=dist({x:(P.lS.x+P.rS.x)/2,y:(P.lS.y+P.rS.y)/2},{x:(P.lH.x+P.rH.x)/2,y:(P.lH.y+P.rH.y)/2})||1;return sw/tl>0.55}
+
+const EXERCISES={
+ kneepush:{name:"Knee push-ups",sub:"Side view",view:"side",need:[11,13,15,23,25],
+  tips:["Put the camera on the floor or a low chair, 2 to 3 metres away.","Turn sideways so the camera sees one side of your body.","Make sure your head, hands and knees are all in the picture."],
+  key:P=>ang(P.S,P.E,P.W),keyName:"Elbow angle",
+  rep:{start:v=>v<135,end:v=>v>150,track:"min",goodDepth:v=>v<=100,depthCue:"Go lower. Bring your chest close to the floor",depthFix:"Lower until your elbows bend to about 90 degrees and your chest is a fist above the floor."},
+  rules:[
+   {id:"line",label:"Straight line from shoulders to knees",segs:[["S","H"],["H","K"]],
+    check:P=>{const a=ang(P.S,P.H,P.K),o=offLine(P.H,P.S,P.K);if(a>=158)return null;return o>0?"sag":"pike"},
+    cues:{sag:"Hips are dropping. Squeeze your stomach and lift your hips",pike:"Hips are too high. Lower them into a straight line"},
+    fix:"Squeeze your glutes and tighten your stomach so your shoulders, hips and knees stay in one straight line."},
+   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],
+    check:P=>ang(P.Ear,P.S,P.H)<145?"bad":null,cues:{bad:"Keep your head in line. Look at the floor in front of your hands"},
+    fix:"Look at the floor slightly ahead of your hands so your neck stays straight. Your chest should touch down first, not your nose."},
+   {id:"hands",label:"Hands under your shoulders",segs:[["S","E"],["E","W"]],onlyDown:true,
+    check:P=>Math.abs(P.W.x-P.S.x)>0.45*dist(P.S,P.H)?"bad":null,cues:{bad:"Move your hands closer, under your shoulders"},
+    fix:"Place your hands a little wider than your shoulders, directly below them, so your elbows stack over your wrists at the bottom."}
+  ]},
+ pushup:{name:"Push-ups",sub:"Side view",view:"side",need:[11,13,15,23,25,27],
+  tips:["Put the camera on the floor or a low chair, 2 to 3 metres away.","Turn sideways so the camera sees one side of your body.","Your head, hands and feet must all be in the picture."],
+  key:P=>ang(P.S,P.E,P.W),keyName:"Elbow angle",
+  rep:{start:v=>v<135,end:v=>v>150,track:"min",goodDepth:v=>v<=100,depthCue:"Go lower. Bring your chest close to the floor",depthFix:"Lower until your elbows bend to about 90 degrees and your chest is a fist above the floor."},
+  rules:[
+   {id:"line",label:"Straight line from shoulders to ankles",segs:[["S","H"],["H","A"]],
+    check:P=>{const a=ang(P.S,P.H,P.A),o=offLine(P.H,P.S,P.A);if(a>=160)return null;return o>0?"sag":"pike"},
+    cues:{sag:"Hips are dropping. Squeeze your stomach and glutes",pike:"Hips are too high. Lower them into a straight line"},
+    fix:"Squeeze your glutes and tighten your stomach so your body is one straight line from head to heels. If you can't hold it, switch to knee push-ups."},
+   {id:"legs",label:"Legs straight",segs:[["H","K"],["K","A"]],check:P=>ang(P.H,P.K,P.A)<155?"bad":null,cues:{bad:"Straighten your legs"},fix:"Keep your knees locked straight and push back through your heels."},
+   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:P=>ang(P.Ear,P.S,P.H)<145?"bad":null,cues:{bad:"Keep your head in line. Look at the floor in front of your hands"},fix:"Look at the floor slightly ahead of your hands so your neck stays straight."},
+   {id:"hands",label:"Hands under your shoulders",segs:[["S","E"],["E","W"]],onlyDown:true,check:P=>Math.abs(P.W.x-P.S.x)>0.45*dist(P.S,P.H)?"bad":null,cues:{bad:"Move your hands closer, under your shoulders"},fix:"Hands directly below your shoulders, a little wider than shoulder width."}
+  ]},
+ squat:{name:"Squats",sub:"Side or front view",view:"any",need:[11,23,25,27],
+  tips:["Put the camera at hip height, 2 to 3 metres away.","Side view checks depth, chest and heels. Facing the camera checks if your knees cave in.","Your whole body from head to feet must be in the picture."],
+  key:P=>ang(P.H,P.K,P.A),keyName:"Knee angle",
+  rep:{start:v=>v<140,end:v=>v>160,track:"min",goodDepth:v=>v<=105,depthCue:"Squat lower. Bring your hips down to knee height",depthFix:"Push your hips back and down until your thighs are about level with the floor. Use a chair behind you as a target."},
+  rules:[
+   {id:"chest",label:"Chest up",segs:[["S","H"]],sideOnly:true,onlyDown:true,check:P=>tiltFromVertical(P.S,P.H)>50?"bad":null,cues:{bad:"Chest up. You are leaning too far forward"},fix:"Keep your chest facing forward. Holding a bottle at your chest helps you stay upright."},
+   {id:"heels",label:"Heels on the floor",segs:[["A","T"]],sideOnly:true,check:P=>(P.T.y-P.He.y)>0.12*dist(P.K,P.A)?"bad":null,cues:{bad:"Keep your heels down. Push through your whole foot"},fix:"Keep weight in the middle of your foot and heels. If your heels lift, stand a bit wider and work on ankle stretches."},
+   {id:"knees",label:"Knees pushed out over toes",segs:[["H","K"],["H2","K2"]],frontOnly:true,onlyDown:true,check:P=>{const kd=Math.abs(P.lK.x-P.rK.x),ad=Math.abs(P.lA.x-P.rA.x);return kd<0.8*ad?"bad":null},cues:{bad:"Knees are caving in. Push your knees out"},fix:"Push your knees outward so they point the same way as your toes, all the way down and up."}
+  ]},
+ plank:{name:"Plank",sub:"Side view, timed",view:"side",timed:true,need:[11,13,23,27],
+  tips:["Put the camera on the floor, 2 to 3 metres away.","Turn sideways so the camera sees one side of your body.","Head, elbows and feet must all be in the picture."],
+  key:P=>ang(P.S,P.H,P.A),keyName:"Body line",
+  rules:[
+   {id:"line",label:"Straight line from shoulders to ankles",segs:[["S","H"],["H","A"]],check:P=>{const a=ang(P.S,P.H,P.A),o=offLine(P.H,P.S,P.A);if(a>=162)return null;return o>0?"sag":"pike"},cues:{sag:"Hips are sagging. Tuck your tailbone and squeeze your glutes",pike:"Hips are too high. Lower them into a straight line"},fix:"Squeeze your glutes and tuck your tailbone slightly. Shorter holds with a straight body are better than long holds with sagging hips."},
+   {id:"elbow",label:"Elbows under shoulders",segs:[["S","E"]],check:P=>Math.abs(P.E.x-P.S.x)>0.3*dist(P.S,P.H)?"bad":null,cues:{bad:"Put your elbows directly under your shoulders"},fix:"Stack your elbows directly below your shoulders and push the floor away."},
+   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:P=>ang(P.Ear,P.S,P.H)<145?"bad":null,cues:{bad:"Keep your head in line. Look at the floor"},fix:"Look at the floor just in front of your hands."}
+  ]},
+ lunge:{name:"Lunges",sub:"Side view",view:"side",need:[11,23,25,27,26,28],
+  tips:["Put the camera at hip height, 2 to 3 metres away.","Turn sideways so the camera sees you step forward.","Your whole body including both feet must be in the picture."],
+  key:P=>Math.min(ang(P.H,P.K,P.A),ang(P.H2,P.K2,P.A2)),keyName:"Front knee angle",
+  rep:{start:v=>v<140,end:v=>v>160,track:"min",goodDepth:v=>v<=105,depthCue:"Go lower. Bring your back knee toward the floor",depthFix:"Lower until both knees bend to about 90 degrees, with the back knee just above the floor."},
+  rules:[
+   {id:"tall",label:"Upper body tall",segs:[["S","H"]],onlyDown:true,check:P=>tiltFromVertical(P.S,P.H)>25?"bad":null,cues:{bad:"Stay tall. Keep your chest up"},fix:"Keep your shoulders stacked over your hips the whole time."},
+   {id:"knee",label:"Front knee behind your toes",segs:[["K","A"],["K2","A2"]],onlyDown:true,check:P=>{
+      const dir=Math.sign(P.Nose.x-P.Ear.x)||1;const fA=(P.A.x-P.A2.x)*dir>0;const K=fA?P.K:P.K2,T=fA?P.T:P.T2,A=fA?P.A:P.A2;
+      return (K.x-T.x)*dir>0.25*dist(K,A)?"bad":null},cues:{bad:"Front knee is too far forward. Take a longer step"},fix:"Take a longer step so your front knee stays above your ankle, not past your toes."}
+  ]},
+ bridge:{name:"Glute bridge",sub:"Side view",view:"side",need:[11,23,25,27],
+  tips:["Put the camera on the floor, 2 to 3 metres away.","Lie on your back side-on to the camera.","Shoulders, hips, knees and feet must all be in the picture."],
+  key:P=>ang(P.S,P.H,P.K),keyName:"Hip angle",
+  rep:{start:v=>v>150,end:v=>v<140,track:"max",goodDepth:v=>v>=165,depthCue:"Lift your hips higher and squeeze your glutes",depthFix:"Push through your heels and lift until your shoulders, hips and knees form a straight line. Squeeze your glutes for 2 seconds at the top."},
+  rules:[
+   {id:"arch",label:"No arching at the top",segs:[["S","H"],["H","K"]],onlyDown:true,check:P=>offLine(P.H,P.S,P.K)<-0.08?"bad":null,cues:{bad:"Don't arch your back. Stop when your body is straight"},fix:"Stop when your body is in a straight line. Tuck your tailbone before you lift so your glutes do the work, not your lower back."},
+   {id:"feet",label:"Heels close to your body",segs:[["K","A"]],onlyDown:true,check:P=>ang(P.H,P.K,P.A)>115?"bad":null,cues:{bad:"Bring your heels closer to your body"},fix:"Put your heels about a hand-length from your glutes so your knees bend to about 90 degrees at the top."}
+  ]}
+};
+
+/* Session: feed it landmarks frame by frame; it returns what to show. */
+function Session(exKey){
+  this.ex=EXERCISES[exKey];this.key=exKey;this.reps=[];this.inRep=false;this.cur=null;this.bad={};this.goodMs=0;this.badMs=0;this.faultMs={};this.lastT=null;this.smooth=null;this.lastKey=null;
+}
+Session.prototype.feed=function(lm,t){
+  const ex=this.ex,out={visible:true,rules:{},cue:null,cueType:"info",event:null,key:null,badSegs:[],side:null};
+  const vis=ex.need.every(i=>{const L=lm[i],R=lm[i%2?i+1:i-1];return Math.max(L.visibility??1,(R&&R.visibility)??1)>0.5});
+  if(this.smooth){for(let i=0;i<lm.length;i++){const s=this.smooth[i],p=lm[i];s.x+= .55*(p.x-s.x);s.y+=.55*(p.y-s.y);s.visibility=p.visibility}}
+  else this.smooth=lm.map(p=>({x:p.x,y:p.y,visibility:p.visibility}));
+  const dt=this.lastT==null?0:Math.min(200,t-this.lastT);this.lastT=t;
+  if(!vis){out.visible=false;out.cue="Move back so your whole body is in the picture";for(const r of ex.rules)this.bad[r.id]=0;return out}
+  const side=pickSide(this.smooth);out.side=side;
+  const P=pts(this.smooth,side),front=facingCamera(P);
+  if(ex.view==="side"&&front){out.cue="Turn sideways to the camera";out.cueType="info";return out}
+  const k=ex.key(P);out.key=k;
+  let down=false;
+  if(ex.rep){
+    const r=ex.rep;
+    if(!this.inRep&&r.start(k)){this.inRep=true;this.cur={ext:k,frames:0,faults:{},t0:t}}
+    if(this.inRep){down=true;this.cur.frames++;this.cur.ext=r.track==="min"?Math.min(this.cur.ext,k):Math.max(this.cur.ext,k)}
+  }else down=true;
+  let worst=null;
+  for(const rule of ex.rules){
+    if(rule.sideOnly&&front){out.rules[rule.id]="na";continue}
+    if(rule.frontOnly&&!front){out.rules[rule.id]="na";continue}
+    if(rule.onlyDown&&!down){out.rules[rule.id]="idle";this.bad[rule.id]=0;continue}
+    const res=rule.check(P);
+    if(res){this.bad[rule.id]=(this.bad[rule.id]||0)+1;
+      if(this.bad[rule.id]>=6){out.rules[rule.id]="bad";out.badSegs.push(...rule.segs);if(!worst||this.bad[rule.id]>worst.n)worst={rule,res,n:this.bad[rule.id]}}
+      else out.rules[rule.id]="ok";
+      if(this.inRep)this.cur.faults[rule.id]=(this.cur.faults[rule.id]||0)+1;
+    }else{this.bad[rule.id]=0;out.rules[rule.id]="ok"}
+  }
+  if(ex.timed){if(worst){this.badMs+=dt;this.faultMs[worst.rule.id]=(this.faultMs[worst.rule.id]||0)+dt}else this.goodMs+=dt}
+  if(worst){out.cue=worst.rule.cues[worst.res];out.cueType="bad";out.cueId=worst.rule.id+":"+worst.res}
+  else if(ex.timed){out.cue="Good form. Hold it";out.cueType="good"}
+  else if(this.inRep){out.cue="Good form. Keep going";out.cueType="good"}
+  else{out.cue=this.reps.length?"Ready for the next rep":"Start when you are ready";out.cueType="info"}
+  if(ex.rep&&this.inRep&&ex.rep.end(k)){
+    const c=this.cur;this.inRep=false;
+    if(c.frames>=6){
+      const mistakes=[];
+      for(const id in c.faults){if(c.faults[id]>=Math.max(5,c.frames*0.25))mistakes.push(id)}
+      if(!ex.rep.goodDepth(c.ext))mistakes.push("depth");
+      const rep={n:this.reps.length+1,good:!mistakes.length,mistakes,ext:Math.round(c.ext)};
+      this.reps.push(rep);out.event=rep;
+    }
+  }
+  return out;
+};
+Session.prototype.mistakeInfo=function(id){
+  const ex=this.ex;if(id==="depth")return{label:ex.rep.depthCue.split(".")[0],fix:ex.rep.depthFix};
+  const r=ex.rules.find(x=>x.id===id);return{label:r.label,fix:r.fix,cue:Object.values(r.cues)[0]};
+};
+if(typeof module!=="undefined")module.exports={EXERCISES,Session,ang};
+</script>
+
+<script>
+/* ===== UI ===== */
+const $=id=>document.getElementById(id);
+const ui={ex:"kneepush",facing:"user",voice:true};
+const SEG_MAP={S:"S",E:"E",W:"W",H:"H",K:"K",A:"A",T:"T",Ear:"Ear",H2:"H2",K2:"K2",A2:"A2"};
+
+function renderSetup(){
+  const g=$("exGrid");g.innerHTML="";
+  Object.entries(EXERCISES).forEach(([k,e])=>{
+    const b=document.createElement("button");b.className="ex";b.type="button";b.setAttribute("aria-pressed",ui.ex===k);
+    b.innerHTML="<b></b><span></span>";b.querySelector("b").textContent=e.name;b.querySelector("span").textContent=e.sub;
+    b.addEventListener("click",()=>{ui.ex=k;renderSetup()});g.appendChild(b);
+  });
+  const e=EXERCISES[ui.ex];$("tipList").innerHTML="";
+  e.tips.forEach(t=>{const li=document.createElement("li");li.textContent=t;$("tipList").appendChild(li)});
+  const floor=["kneepush","pushup","plank","bridge"].includes(ui.ex);
+  $("setupSvg").innerHTML=`
+    <line x1="10" y1="104" x2="210" y2="104" stroke="currentColor" stroke-opacity=".35" stroke-width="2"/>
+    <rect x="16" y="${floor?86:52}" width="16" height="${floor?18:52}" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-opacity=".5"/>
+    <rect x="18" y="${floor?74:38}" width="12" height="20" rx="2" fill="var(--accent)"/>
+    <path d="M30 ${floor?84:48} L140 ${floor?60:30} M30 ${floor?84:48} L140 ${floor?104:104}" stroke="var(--accent)" stroke-dasharray="4 4" fill="none"/>
+    ${floor?'<g stroke="currentColor" stroke-width="5" stroke-linecap="round" fill="none"><circle cx="190" cy="78" r="6" fill="currentColor" stroke="none"/><path d="M182 82 L140 94 L118 103"/><path d="M180 84 L182 103"/></g>'
+           :'<g stroke="currentColor" stroke-width="5" stroke-linecap="round" fill="none"><circle cx="170" cy="30" r="7" fill="currentColor" stroke="none"/><path d="M170 40 L170 70 L162 86 L170 103"/><path d="M170 46 L182 60"/></g>'}
+    <text x="80" y="118" font-size="10" fill="currentColor" fill-opacity=".7" text-anchor="middle" font-family="var(--body)">2 to 3 m</text>`;
+}
+renderSetup();
+function setCam(f){ui.facing=f;$("camFront").setAttribute("aria-pressed",f==="user");$("camBack").setAttribute("aria-pressed",f!=="user")}
+$("camFront").onclick=()=>setCam("user");$("camBack").onclick=()=>setCam("environment");
+function setVoice(v){ui.voice=v;["voiceBtn","voiceBtn2"].forEach(id=>{$(id).setAttribute("aria-pressed",v);$(id).textContent=v?(id==="voiceBtn"?"Voice coach on":"Voice on"):(id==="voiceBtn"?"Voice coach off":"Voice off")});if(!v&&window.speechSynthesis)speechSynthesis.cancel()}
+$("voiceBtn").onclick=()=>setVoice(!ui.voice);$("voiceBtn2").onclick=()=>setVoice(!ui.voice);
+
+/* speech */
+let lastSaid={},lastAny=0;
+function say(text,id,force){
+  if(!ui.voice||!window.speechSynthesis)return;const now=performance.now();
+  if(!force&&(now-lastAny<1800||(lastSaid[id]&&now-lastSaid[id]<4000)))return;
+  lastSaid[id]=now;lastAny=now;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.rate=1.05;speechSynthesis.speak(u);
+}
+
+/* camera + model */
+let landmarker=null,stream=null,session=null,running=false,lastVideoT=-1,lastCueId=null,cueSince=0;
+async function loadModel(){
+  if(landmarker)return landmarker;
+  const {PoseLandmarker,FilesetResolver}=await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
+  const files=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  const opts=d=>({baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",delegate:d},runningMode:"VIDEO",numPoses:1,minPoseDetectionConfidence:.5,minTrackingConfidence:.5});
+  try{landmarker=await PoseLandmarker.createFromOptions(files,opts("GPU"))}catch(e){landmarker=await PoseLandmarker.createFromOptions(files,opts("CPU"))}
+  return landmarker;
+}
+async function openCamera(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:ui.facing,width:{ideal:1280},height:{ideal:720}}});
+  const v=$("video");v.srcObject=stream;await v.play();
+  $("stage").classList.toggle("mirror",ui.facing==="user");fitStage();
+}
+function fitStage(){
+  const v=$("video");if(!v.videoWidth)return;
+  const box=$("stageBox"),maxW=box.clientWidth,maxH=Math.max(260,window.innerHeight*0.72);
+  const r=v.videoWidth/v.videoHeight;let w=maxW,h=w/r;if(h>maxH){h=maxH;w=h*r}
+  $("stage").style.width=w+"px";$("stage").style.height=h+"px";
+  const c=$("overlay");c.width=v.videoWidth;c.height=v.videoHeight;
+}
+window.addEventListener("resize",fitStage);
+
+function showErr(msg){const e=$("setupErr");e.textContent=msg;e.hidden=false}
+$("startBtn").onclick=async()=>{
+  $("setupErr").hidden=true;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showErr("This browser can't open the camera here. Open this file in Chrome on a laptop, or from an https link on your phone.");return}
+  say("",0,true);
+  $("setup").hidden=true;$("summary").hidden=true;$("live").hidden=false;$("loading").hidden=false;
+  startSession();
+  try{await openCamera()}catch(e){backToSetup();showErr(e&&e.name==="NotAllowedError"?"Camera permission was blocked. Allow the camera for this page in your browser settings, then press Start again.":"Couldn't open the camera: "+(e&&e.message||e));return}
+  try{await loadModel()}catch(e){backToSetup();showErr("Couldn't load body tracking. Check your internet connection and try again.");return}
+  $("loading").hidden=true;running=true;requestAnimationFrame(loop);
+};
+function startSession(){
+  session=new Session(ui.ex);const ex=session.ex;
+  $("liveTitle").textContent=ex.name;$("goodN").textContent="0";$("repN").textContent=ex.timed?"0:00":"0";$("repLabel").textContent=ex.timed?"Good time":"Reps";
+  $("goodN").parentElement.hidden=!!ex.timed;
+  $("repLog").innerHTML='<li class="note">'+(ex.timed?"Hold the plank. Only time with good form counts.":"Reps appear here as you do them.")+"</li>";
+  const rl=$("ruleList");rl.innerHTML="";
+  const rows=ex.rules.map(r=>({id:r.id,label:r.label}));if(ex.rep)rows.push({id:"depth",label:ex.rep.depthCue.split(".")[0]==="Go lower"?"Full depth on each rep":"Full range on each rep"});
+  rows.forEach(r=>{const li=document.createElement("li");li.id="rule-"+r.id;li.innerHTML='<span class="dot"></span><span></span>';li.lastChild.textContent=r.label;rl.appendChild(li)});
+  setCue("Get into position","info");
+}
+function setCue(t,type){const c=$("cue");if(c.textContent!==t)c.textContent=t;c.className="cue "+type}
+function backToSetup(){running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$("live").hidden=true;$("summary").hidden=true;$("setup").hidden=false}
+
+const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[27,29],[28,30],[7,11],[8,12]];
+function segIdx(side,name){const l=side==="l";return {S:l?11:12,E:l?13:14,W:l?15:16,H:l?23:24,K:l?25:26,A:l?27:28,T:l?31:32,Ear:l?7:8,H2:l?24:23,K2:l?26:25,A2:l?28:27}[name]}
+function draw(lm,res){
+  const c=$("overlay"),x=c.getContext("2d"),W=c.width,H=c.height;x.clearRect(0,0,W,H);if(!lm)return;
+  const bad=new Set();(res.badSegs||[]).forEach(([a,b])=>{const i=segIdx(res.side,a),j=segIdx(res.side,b);bad.add(i+"-"+j);bad.add(j+"-"+i)});
+  const lw=Math.max(4,W/180);x.lineCap="round";
+  BONES.forEach(([i,j])=>{const a=lm[i],b=lm[j];if((a.visibility??1)<.4||(b.visibility??1)<.4)return;
+    const isBad=bad.has(i+"-"+j);x.strokeStyle=isBad?"#FF4D36":res.visible?"#4FD38A":"#BBBBBB";x.lineWidth=isBad?lw*1.8:lw;
+    x.beginPath();x.moveTo(a.x*W,a.y*H);x.lineTo(b.x*W,b.y*H);x.stroke()});
+  (res.badSegs||[]).forEach(([a,b])=>{const i=segIdx(res.side,a),j=segIdx(res.side,b);if(i==null||j==null)return;const A=lm[i],B=lm[j];
+    x.strokeStyle="#FF4D36";x.lineWidth=lw*1.8;x.beginPath();x.moveTo(A.x*W,A.y*H);x.lineTo(B.x*W,B.y*H);x.stroke()});
+  [0,11,12,13,14,15,16,23,24,25,26,27,28].forEach(i=>{const p=lm[i];if((p.visibility??1)<.4)return;x.fillStyle="#fff";x.beginPath();x.arc(p.x*W,p.y*H,lw*.9,0,Math.PI*2);x.fill()});
+}
+function fmt(ms){const s=Math.floor(ms/1000);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+
+function loop(){
+  if(!running)return;
+  const v=$("video");
+  if(v.readyState>=2&&v.currentTime!==lastVideoT){
+    lastVideoT=v.currentTime;const now=performance.now();
+    let r=null;try{r=landmarker.detectForVideo(v,now)}catch(e){}
+    const lm=r&&r.landmarks&&r.landmarks[0];
+    if(!lm){draw(null,{});setCue("Step into the picture so the camera can see you","info");for(const k in session.bad)session.bad[k]=0}
+    else{
+      const res=session.feed(lm,now);draw(session.smooth,res);
+      for(const id in res.rules){const li=$("rule-"+id);if(!li)continue;const st=res.rules[id];li.className=st==="bad"?"bad":"";li.firstChild.className="dot"+(st==="bad"?" bad":st==="ok"?" ok":"")}
+      setCue(res.cue,res.cueType);
+      if(res.cueType==="bad"){if(res.cueId!==lastCueId){lastCueId=res.cueId;cueSince=now}if(now-cueSince>500)say(res.cue,res.cueId)}else lastCueId=null;
+      if(res.cue&&!res.visible)say(res.cue,"vis");
+      if(res.key!=null)$("keyAngle").textContent=session.ex.keyName+": "+Math.round(res.key)+" degrees";
+      if(session.ex.timed){$("repN").textContent=fmt(session.goodMs)}
+      if(res.event)onRep(res.event);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+function onRep(rep){
+  const n=session.reps.length,good=session.reps.filter(r=>r.good).length;
+  $("repN").textContent=n;$("goodN").textContent=good;
+  const log=$("repLog");if(n===1)log.innerHTML="";
+  const li=document.createElement("li");
+  const label=rep.good?"Good rep":rep.mistakes.map(m=>session.mistakeInfo(m).label).join(", ");
+  li.innerHTML='<span class="n">Rep '+rep.n+'</span><span class="'+(rep.good?"g":"b")+'"></span>';li.lastChild.textContent=label;
+  log.prepend(li);
+  if(rep.good)say(String(n),"rep"+n,true);
+  else{const m=rep.mistakes[0];say(m==="depth"?session.ex.rep.depthCue:"Rep "+n+". "+session.mistakeInfo(m).label,"miss"+n,true)}
+}
+
+$("flipBtn").onclick=async()=>{setCam(ui.facing==="user"?"environment":"user");try{await openCamera()}catch(e){setCue("Couldn't switch camera","bad")}};
+$("stopBtn").onclick=()=>{running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}if(window.speechSynthesis)speechSynthesis.cancel();showSummary()};
+$("againBtn").onclick=()=>{$("summary").hidden=true;$("startBtn").click()};
+$("changeBtn").onclick=()=>{backToSetup()};
+
+function showSummary(){
+  $("live").hidden=true;$("summary").hidden=false;
+  const ex=session.ex;$("sumTitle").textContent=ex.name+" summary";
+  const s=$("sumStats");s.innerHTML="";
+  const box=(v,l)=>{const d=document.createElement("div");d.className="sum";d.innerHTML="<b></b><span></span>";d.firstChild.textContent=v;d.lastChild.textContent=l;s.appendChild(d)};
+  const m={};
+  if(ex.timed){box(fmt(session.goodMs),"Good form time");box(fmt(session.badMs),"Time with mistakes")}
+  else{const g=session.reps.filter(r=>r.good).length;box(session.reps.length,"Total reps");box(g,"Good reps");box(session.reps.length-g,"Reps to fix")}
+  session.reps.forEach(r=>r.mistakes.forEach(x=>m[x]=(m[x]||0)+1));
+  if(ex.timed)for(const id in session.faultMs)if(session.faultMs[id]>1500)m[id]=session.faultMs[id];
+  const out=$("sumMistakes");out.innerHTML="";
+  const list=Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  if(!list.length){
+    const d=document.createElement("div");d.className="allgood";
+    d.textContent=(!ex.timed&&!session.reps.length)?"No reps were counted. Make sure your whole body is in the picture and go through the full movement.":ex.timed?"Keep your hips level and your elbows under your shoulders. Try to make the good-form time longer each day.":"Every rep had good form. Add 2 to 3 more reps next time.";
+    out.appendChild(d);return;
+  }
+  const h=document.createElement("h2");h.textContent="Mistakes to fix";out.appendChild(h);
+  list.forEach(([id,n])=>{const info=session.mistakeInfo(id);const d=document.createElement("div");d.className="mist";
+    d.innerHTML="<h3></h3><p></p>";d.firstChild.textContent=info.label+(ex.timed?" ("+fmt(n)+" of your hold)":" ("+n+" of "+session.reps.length+" reps)");d.lastChild.textContent=info.fix;out.appendChild(d)});
+}
+</script>
+</body>
+</html>
