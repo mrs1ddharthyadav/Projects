@@ -77,6 +77,9 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .dot.ok{background:var(--good)}
 .dot.bad{background:var(--bad)}
 .rules li.bad{font-weight:700;color:var(--bad)}
+.rules li.na{color:var(--muted)}
+.rules li.na .lbl::after{content:" (face the camera to check)";font-size:.85em}
+.viewchip{font:700 .8rem var(--body);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:4px;background:var(--accent-soft);color:var(--accent);font-variant-numeric:tabular-nums}
 .log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:.9rem;max-height:220px;overflow:auto}
 .log li{display:flex;gap:8px;align-items:baseline}
 .log .n{font-variant-numeric:tabular-nums;color:var(--muted);min-width:3.5em}
@@ -102,7 +105,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <section id="setup" class="wrap" style="padding:0">
   <header>
     <h1>Live Form Coach</h1>
-    <p class="lede">Your camera watches your body while you exercise. It checks your posture on every rep, says out loud what to fix, and counts good and bad reps. Video stays on your device and is never uploaded.</p>
+    <p class="lede">Your camera watches your body in 3D while you exercise, from the front, the side or any angle. It checks your posture on every rep, says out loud what to fix, and counts good and bad reps. Video stays on your device and is never uploaded.</p>
   </header>
 
   <div class="panel">
@@ -134,7 +137,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 
 <section id="live" hidden>
   <div class="topbar">
-    <h2 id="liveTitle">Knee push-ups</h2>
+    <div class="row" style="gap:12px"><h2 id="liveTitle">Knee push-ups</h2><span class="viewchip" id="viewChip">Finding you</span></div>
     <div class="stats">
       <div class="stat good"><b id="goodN">0</b><span>Good</span></div>
       <div class="stat"><b id="repN">0</b><span id="repLabel">Reps</span></div>
@@ -153,6 +156,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       <div class="panel">
         <h2>Form checks</h2>
         <ul class="rules" id="ruleList"></ul>
+        <p class="note" id="viewHint"></p>
         <div class="keyangle" id="keyAngle"></div>
       </div>
       <div class="panel">
@@ -183,121 +187,173 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 </div>
 
 <script>
-/* ===== Pose rules (pure logic, no browser APIs) ===== */
-const LM={nose:0,lear:7,rear:8,ls:11,rs:12,le:13,re:14,lw:15,rw:16,lh:23,rh:24,lk:25,rk:26,la:27,ra:28,lhe:29,rhe:30,lt:31,rt:32};
-function ang(a,b,c){const v1=[a.x-b.x,a.y-b.y],v2=[c.x-b.x,c.y-b.y];const d=Math.hypot(...v1)*Math.hypot(...v2);if(!d)return 180;return Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/d)))*180/Math.PI}
-function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
-/* signed vertical offset of p from line a->b, as a fraction of the a-b length; + means p is BELOW the line on screen */
-function offLine(p,a,b){const L=dist(a,b)||1;const dx=b.x-a.x;if(Math.abs(dx)<1e-6)return 0;const t=(p.x-a.x)/dx;const ly=a.y+t*(b.y-a.y);return (p.y-ly)/L}
-function tiltFromVertical(top,bottom){return Math.abs(Math.atan2(top.x-bottom.x,bottom.y-top.y))*180/Math.PI}
-function pickSide(lm){
-  const L=[11,13,15,23,25,27].reduce((s,i)=>s+(lm[i].visibility??1),0),R=[12,14,16,24,26,28].reduce((s,i)=>s+(lm[i].visibility??1),0);
-  return L>=R?"l":"r";
+/* ===== Pose rules (pure logic, no browser APIs). Uses MediaPipe 3D world landmarks (metres, y points down), so angles are the same from any camera angle. ===== */
+const DEG=180/Math.PI;
+const J={S:[11,12],E:[13,14],W:[15,16],H:[23,24],K:[25,26],A:[27,28],He:[29,30],T:[31,32],Ear:[7,8]};
+function clamp(v){return Math.max(-1,Math.min(1,v))}
+function V(a,b){return [b.x-a.x,b.y-a.y,(b.z||0)-(a.z||0)]}
+function dot(u,v){return u[0]*v[0]+u[1]*v[1]+u[2]*v[2]}
+function nrm(u){return Math.hypot(u[0],u[1],u[2])}
+function ang3(a,b,c){const u=V(b,a),w=V(b,c),d=nrm(u)*nrm(w);return d?Math.acos(clamp(dot(u,w)/d))*DEG:180}
+function dist3(a,b){return nrm(V(a,b))}
+function mid(a,b){return {x:(a.x+b.x)/2,y:(a.y+b.y)/2,z:((a.z||0)+(b.z||0))/2}}
+/* angle of the segment bottom->top away from straight up (0 = perfectly vertical) */
+function fromVertical(top,bottom){const u=V(bottom,top),n=nrm(u);return n?Math.acos(clamp(-u[1]/n))*DEG:0}
+/* where p sits relative to the line a-b: frac = distance / line length, dy = vertical part (+ = below the line) */
+function lineOff(p,a,b){const ab=V(a,b),ap=V(a,p),L2=dot(ab,ab)||1,t=dot(ap,ab)/L2;const o=[ap[0]-ab[0]*t,ap[1]-ab[1]*t,ap[2]-ab[2]*t],L=Math.sqrt(L2);return {frac:nrm(o)/L,dy:o[1]/L}}
+
+function makeP(w,img){
+  const vis=i=>img[i].visibility??1;
+  const P={w,img};
+  P.g=(n,s)=>w[J[n][s==="l"?0:1]];
+  P.m=n=>mid(w[J[n][0]],w[J[n][1]]);
+  P.visL=[11,13,15,23,25,27].reduce((a,i)=>a+vis(i),0)/6;
+  P.visR=[12,14,16,24,26,28].reduce((a,i)=>a+vis(i),0)/6;
+  P.both=P.visL>.6&&P.visR>.6;
+  P.best=P.visL>=P.visR?"l":"r";
+  P.ang=(a,b,c)=>{const l=ang3(P.g(a,"l"),P.g(b,"l"),P.g(c,"l")),r=ang3(P.g(a,"r"),P.g(b,"r"),P.g(c,"r"));return {l,r,avg:P.both?(l+r)/2:(P.best==="l"?l:r)}};
+  /* how much the shoulder line faces the camera: 1 = facing, 0 = side-on */
+  const sv=V(w[11],w[12]),sn=nrm(sv)||1;P.front=Math.abs(sv[0])/sn;
+  P.view=P.front>.72?"front":P.front<.4?"side":"angled";
+  return P;
 }
-function pts(lm,side){
-  const s=side==="l";const g=i=>lm[i];
-  return {S:g(s?11:12),E:g(s?13:14),W:g(s?15:16),H:g(s?23:24),K:g(s?25:26),A:g(s?27:28),He:g(s?29:30),T:g(s?31:32),Ear:g(s?7:8),Nose:g(0),
-    S2:g(s?12:11),H2:g(s?24:23),K2:g(s?26:25),A2:g(s?28:27),T2:g(s?32:31),
-    lK:g(25),rK:g(26),lA:g(27),rA:g(28),lS:g(11),rS:g(12),lH:g(23),rH:g(24)};
-}
-function facingCamera(P){const sw=dist(P.lS,P.rS),tl=dist({x:(P.lS.x+P.rS.x)/2,y:(P.lS.y+P.rS.y)/2},{x:(P.lH.x+P.rH.x)/2,y:(P.lH.y+P.rH.y)/2})||1;return sw/tl>0.55}
+
+const LINE=(endName,minAng)=>(P=>{const a=P.ang("S","H",endName).avg;if(a>=minAng)return null;return lineOff(P.m("H"),P.m("S"),P.m(endName)).dy>0?"sag":"pike"});
+const HEAD=end=>(P=>ang3(P.m("Ear"),P.m("S"),P.m(end))<145?"bad":null);
+const HANDS_UNDER=P=>{if(P.ang("S","E","W").avg<140)return null;const t=s=>fromVertical(P.g("S",s),P.g("W",s));const v=P.both?(t("l")+t("r"))/2:t(P.best);return v>28?"bad":null};
+const HAND_WIDTH=P=>{const r=dist3(P.g("W","l"),P.g("W","r"))/(dist3(P.g("S","l"),P.g("S","r"))||1);return r>2.0?"wide":r<0.85?"narrow":null};
+const FLARE=P=>{if(P.ang("S","E","W").avg>125)return null;const f=s=>ang3(P.g("E",s),P.g("S",s),P.g("H",s));return (f("l")+f("r"))/2>72?"bad":null};
+const EVEN=(a,b,c,lim)=>(P=>Math.abs(P.ang(a,b,c).l-P.ang(a,b,c).r)>lim?"bad":null);
 
 const EXERCISES={
- kneepush:{name:"Knee push-ups",sub:"Side view",view:"side",need:[11,13,15,23,25],
-  tips:["Put the camera on the floor or a low chair, 2 to 3 metres away.","Turn sideways so the camera sees one side of your body.","Make sure your head, hands and knees are all in the picture."],
-  key:P=>ang(P.S,P.E,P.W),keyName:"Elbow angle",
-  rep:{start:v=>v<135,end:v=>v>150,track:"min",goodDepth:v=>v<=100,depthCue:"Go lower. Bring your chest close to the floor",depthFix:"Lower until your elbows bend to about 90 degrees and your chest is a fist above the floor."},
+ kneepush:{name:"Knee push-ups",sub:"Any angle",need:[11,13,15,23,25],
+  tips:["Put the camera on the floor or a low chair, 2 to 3 metres away.","Any angle works. Do a few reps facing the camera and a few side-on to check everything.","Make sure your head, hands and knees are all in the picture."],
+  key:P=>P.ang("S","E","W").avg,keyName:"Elbow angle",
+  rep:{dir:"down",drop:24,back:12,ok:v=>v<=105,depthLabel:"Full depth on each rep",depthCue:"Go lower. Bring your chest close to the floor",depthFix:"Lower until your elbows bend to about 90 degrees and your chest is a fist above the floor."},
   rules:[
-   {id:"line",label:"Straight line from shoulders to knees",segs:[["S","H"],["H","K"]],
-    check:P=>{const a=ang(P.S,P.H,P.K),o=offLine(P.H,P.S,P.K);if(a>=158)return null;return o>0?"sag":"pike"},
+   {id:"line",label:"Straight line from shoulders to knees",segs:[["S","H"],["H","K"]],check:LINE("K",158),
     cues:{sag:"Hips are dropping. Squeeze your stomach and lift your hips",pike:"Hips are too high. Lower them into a straight line"},
     fix:"Squeeze your glutes and tighten your stomach so your shoulders, hips and knees stay in one straight line."},
-   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],
-    check:P=>ang(P.Ear,P.S,P.H)<145?"bad":null,cues:{bad:"Keep your head in line. Look at the floor in front of your hands"},
+   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:HEAD("K"),cues:{bad:"Keep your head in line. Look at the floor in front of your hands"},
     fix:"Look at the floor slightly ahead of your hands so your neck stays straight. Your chest should touch down first, not your nose."},
-   {id:"hands",label:"Hands under your shoulders",segs:[["S","E"],["E","W"]],onlyDown:true,
-    check:P=>Math.abs(P.W.x-P.S.x)>0.45*dist(P.S,P.H)?"bad":null,cues:{bad:"Move your hands closer, under your shoulders"},
-    fix:"Place your hands a little wider than your shoulders, directly below them, so your elbows stack over your wrists at the bottom."}
+   {id:"hands",label:"Hands under your shoulders",segs:[["S","W"]],check:HANDS_UNDER,cues:{bad:"Move your hands so they are under your shoulders"},
+    fix:"At the top, your arms should be straight up and down, with hands directly below your shoulders."},
+   {id:"width",label:"Hands a little wider than shoulders",segs:[["W","W"]],check:HAND_WIDTH,cues:{wide:"Hands are too wide. Bring them closer",narrow:"Hands are too close. Move them a little wider"},
+    fix:"Place your hands a little wider than your shoulders, fingers pointing forward."},
+   {id:"flare",label:"Elbows tucked at about 45 degrees",segs:[["S","E"]],onlyDown:true,check:FLARE,cues:{bad:"Elbows are flaring out. Tuck them closer to your body"},
+    fix:"Point your elbows back at about 45 degrees from your body, like an arrow shape, not a T shape. This protects your shoulders."},
+   {id:"even",label:"Both arms pushing evenly",segs:[["S","E"],["E","W"]],onlyDown:true,front:true,check:EVEN("S","E","W",22),cues:{bad:"One arm is doing more work. Push evenly with both arms"},
+    fix:"Keep your shoulders level and lower both sides at the same speed. Check that your hands are placed evenly."}
   ]},
- pushup:{name:"Push-ups",sub:"Side view",view:"side",need:[11,13,15,23,25,27],
-  tips:["Put the camera on the floor or a low chair, 2 to 3 metres away.","Turn sideways so the camera sees one side of your body.","Your head, hands and feet must all be in the picture."],
-  key:P=>ang(P.S,P.E,P.W),keyName:"Elbow angle",
-  rep:{start:v=>v<135,end:v=>v>150,track:"min",goodDepth:v=>v<=100,depthCue:"Go lower. Bring your chest close to the floor",depthFix:"Lower until your elbows bend to about 90 degrees and your chest is a fist above the floor."},
+ pushup:{name:"Push-ups",sub:"Any angle",need:[11,13,15,23,25,27],
+  tips:["Put the camera on the floor or a low chair, 2 to 3 metres away.","Any angle works. Do a few reps facing the camera and a few side-on to check everything.","Your head, hands and feet must all be in the picture."],
+  key:P=>P.ang("S","E","W").avg,keyName:"Elbow angle",
+  rep:{dir:"down",drop:24,back:12,ok:v=>v<=105,depthLabel:"Full depth on each rep",depthCue:"Go lower. Bring your chest close to the floor",depthFix:"Lower until your elbows bend to about 90 degrees and your chest is a fist above the floor."},
   rules:[
-   {id:"line",label:"Straight line from shoulders to ankles",segs:[["S","H"],["H","A"]],
-    check:P=>{const a=ang(P.S,P.H,P.A),o=offLine(P.H,P.S,P.A);if(a>=160)return null;return o>0?"sag":"pike"},
+   {id:"line",label:"Straight line from shoulders to ankles",segs:[["S","H"],["H","A"]],check:LINE("A",160),
     cues:{sag:"Hips are dropping. Squeeze your stomach and glutes",pike:"Hips are too high. Lower them into a straight line"},
     fix:"Squeeze your glutes and tighten your stomach so your body is one straight line from head to heels. If you can't hold it, switch to knee push-ups."},
-   {id:"legs",label:"Legs straight",segs:[["H","K"],["K","A"]],check:P=>ang(P.H,P.K,P.A)<155?"bad":null,cues:{bad:"Straighten your legs"},fix:"Keep your knees locked straight and push back through your heels."},
-   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:P=>ang(P.Ear,P.S,P.H)<145?"bad":null,cues:{bad:"Keep your head in line. Look at the floor in front of your hands"},fix:"Look at the floor slightly ahead of your hands so your neck stays straight."},
-   {id:"hands",label:"Hands under your shoulders",segs:[["S","E"],["E","W"]],onlyDown:true,check:P=>Math.abs(P.W.x-P.S.x)>0.45*dist(P.S,P.H)?"bad":null,cues:{bad:"Move your hands closer, under your shoulders"},fix:"Hands directly below your shoulders, a little wider than shoulder width."}
+   {id:"legs",label:"Legs straight",segs:[["H","K"],["K","A"]],check:P=>P.ang("H","K","A").avg<155?"bad":null,cues:{bad:"Straighten your legs"},fix:"Keep your knees straight and push back through your heels."},
+   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:HEAD("A"),cues:{bad:"Keep your head in line. Look at the floor in front of your hands"},fix:"Look at the floor slightly ahead of your hands so your neck stays straight."},
+   {id:"hands",label:"Hands under your shoulders",segs:[["S","W"]],check:HANDS_UNDER,cues:{bad:"Move your hands so they are under your shoulders"},fix:"At the top, your arms should be straight up and down, with hands directly below your shoulders."},
+   {id:"width",label:"Hands a little wider than shoulders",segs:[["W","W"]],check:HAND_WIDTH,cues:{wide:"Hands are too wide. Bring them closer",narrow:"Hands are too close. Move them a little wider"},fix:"Place your hands a little wider than your shoulders, fingers pointing forward."},
+   {id:"flare",label:"Elbows tucked at about 45 degrees",segs:[["S","E"]],onlyDown:true,check:FLARE,cues:{bad:"Elbows are flaring out. Tuck them closer to your body"},fix:"Point your elbows back at about 45 degrees from your body, not straight out to the sides."},
+   {id:"even",label:"Both arms pushing evenly",segs:[["S","E"],["E","W"]],onlyDown:true,front:true,check:EVEN("S","E","W",22),cues:{bad:"One arm is doing more work. Push evenly with both arms"},fix:"Keep your shoulders level and lower both sides at the same speed."}
   ]},
- squat:{name:"Squats",sub:"Side or front view",view:"any",need:[11,23,25,27],
-  tips:["Put the camera at hip height, 2 to 3 metres away.","Side view checks depth, chest and heels. Facing the camera checks if your knees cave in.","Your whole body from head to feet must be in the picture."],
-  key:P=>ang(P.H,P.K,P.A),keyName:"Knee angle",
-  rep:{start:v=>v<140,end:v=>v>160,track:"min",goodDepth:v=>v<=105,depthCue:"Squat lower. Bring your hips down to knee height",depthFix:"Push your hips back and down until your thighs are about level with the floor. Use a chair behind you as a target."},
+ squat:{name:"Squats",sub:"Any angle",need:[11,23,25,27],
+  tips:["Put the camera at hip height, 2 to 3 metres away.","Any angle works. Facing the camera checks your knees and balance. Side-on checks your chest and heels best.","Your whole body from head to feet must be in the picture."],
+  key:P=>P.ang("H","K","A").avg,keyName:"Knee angle",
+  rep:{dir:"down",drop:20,back:10,ok:v=>v<=105,depthLabel:"Full depth on each rep",depthCue:"Squat lower. Bring your hips down to knee height",depthFix:"Push your hips back and down until your thighs are about level with the floor. Use a chair behind you as a target."},
   rules:[
-   {id:"chest",label:"Chest up",segs:[["S","H"]],sideOnly:true,onlyDown:true,check:P=>tiltFromVertical(P.S,P.H)>50?"bad":null,cues:{bad:"Chest up. You are leaning too far forward"},fix:"Keep your chest facing forward. Holding a bottle at your chest helps you stay upright."},
-   {id:"heels",label:"Heels on the floor",segs:[["A","T"]],sideOnly:true,check:P=>(P.T.y-P.He.y)>0.12*dist(P.K,P.A)?"bad":null,cues:{bad:"Keep your heels down. Push through your whole foot"},fix:"Keep weight in the middle of your foot and heels. If your heels lift, stand a bit wider and work on ankle stretches."},
-   {id:"knees",label:"Knees pushed out over toes",segs:[["H","K"],["H2","K2"]],frontOnly:true,onlyDown:true,check:P=>{const kd=Math.abs(P.lK.x-P.rK.x),ad=Math.abs(P.lA.x-P.rA.x);return kd<0.8*ad?"bad":null},cues:{bad:"Knees are caving in. Push your knees out"},fix:"Push your knees outward so they point the same way as your toes, all the way down and up."}
+   {id:"chest",label:"Chest up",segs:[["S","H"]],onlyDown:true,check:P=>fromVertical(P.m("S"),P.m("H"))>50?"bad":null,cues:{bad:"Chest up. You are leaning too far forward"},fix:"Keep your chest facing forward. Holding a bottle at your chest helps you stay upright."},
+   {id:"heels",label:"Heels on the floor",segs:[["A","T"]],check:P=>{const h=s=>P.g("T",s).y-P.g("He",s).y;return Math.max(h("l"),h("r"))>0.045?"bad":null},cues:{bad:"Keep your heels down. Push through your whole foot"},fix:"Keep weight in the middle of your foot and heels. If your heels lift, stand a bit wider and do ankle stretches."},
+   {id:"knees",label:"Knees pushed out over toes",segs:[["H","K"],["K","A"]],onlyDown:true,front:true,check:P=>dist3(P.g("K","l"),P.g("K","r"))<0.8*dist3(P.g("A","l"),P.g("A","r"))?"bad":null,cues:{bad:"Knees are caving in. Push your knees out"},fix:"Push your knees outward so they point the same way as your toes, all the way down and up."},
+   {id:"shift",label:"Weight centred, not leaning to one side",segs:[["H","K"]],onlyDown:true,front:true,check:P=>{const ax=V(P.g("A","l"),P.g("A","r")),n=nrm(ax)||1;return Math.abs(dot(V(P.m("A"),P.m("H")),ax)/n)>0.07?"bad":null},cues:{bad:"You are shifting to one side. Keep your weight in the middle"},fix:"Keep your hips centred between your feet. If one side always takes over, that side is stronger, so slow down and film yourself from the front."},
+   {id:"even",label:"Both legs bending evenly",segs:[["H","K"],["K","A"]],onlyDown:true,front:true,check:EVEN("H","K","A",20),cues:{bad:"One leg is bending more. Keep both sides even"},fix:"Keep your feet the same distance from the centre and lower both legs at the same speed."}
   ]},
- plank:{name:"Plank",sub:"Side view, timed",view:"side",timed:true,need:[11,13,23,27],
-  tips:["Put the camera on the floor, 2 to 3 metres away.","Turn sideways so the camera sees one side of your body.","Head, elbows and feet must all be in the picture."],
-  key:P=>ang(P.S,P.H,P.A),keyName:"Body line",
+ plank:{name:"Plank",sub:"Any angle, timed",timed:true,need:[11,13,23,27],
+  tips:["Put the camera on the floor, 2 to 3 metres away.","Any angle works. Side-on shows your hip line best, the front shows if your hips twist.","Head, elbows and feet must all be in the picture."],
+  key:P=>P.ang("S","H","A").avg,keyName:"Body line",
   rules:[
-   {id:"line",label:"Straight line from shoulders to ankles",segs:[["S","H"],["H","A"]],check:P=>{const a=ang(P.S,P.H,P.A),o=offLine(P.H,P.S,P.A);if(a>=162)return null;return o>0?"sag":"pike"},cues:{sag:"Hips are sagging. Tuck your tailbone and squeeze your glutes",pike:"Hips are too high. Lower them into a straight line"},fix:"Squeeze your glutes and tuck your tailbone slightly. Shorter holds with a straight body are better than long holds with sagging hips."},
-   {id:"elbow",label:"Elbows under shoulders",segs:[["S","E"]],check:P=>Math.abs(P.E.x-P.S.x)>0.3*dist(P.S,P.H)?"bad":null,cues:{bad:"Put your elbows directly under your shoulders"},fix:"Stack your elbows directly below your shoulders and push the floor away."},
-   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:P=>ang(P.Ear,P.S,P.H)<145?"bad":null,cues:{bad:"Keep your head in line. Look at the floor"},fix:"Look at the floor just in front of your hands."}
+   {id:"line",label:"Straight line from shoulders to ankles",segs:[["S","H"],["H","A"]],check:LINE("A",162),cues:{sag:"Hips are sagging. Tuck your tailbone and squeeze your glutes",pike:"Hips are too high. Lower them into a straight line"},fix:"Squeeze your glutes and tuck your tailbone slightly. Shorter holds with a straight body are better than long holds with sagging hips."},
+   {id:"elbow",label:"Elbows under shoulders",segs:[["S","E"]],check:P=>{const t=s=>fromVertical(P.g("S",s),P.g("E",s));return (P.both?(t("l")+t("r"))/2:t(P.best))>25?"bad":null},cues:{bad:"Put your elbows directly under your shoulders"},fix:"Stack your elbows directly below your shoulders and push the floor away."},
+   {id:"head",label:"Head in line with your back",segs:[["Ear","S"]],check:HEAD("A"),cues:{bad:"Keep your head in line. Look at the floor"},fix:"Look at the floor just in front of your hands."},
+   {id:"level",label:"Hips level, not twisting",segs:[["H","H"]],front:true,check:P=>Math.abs(P.g("H","l").y-P.g("H","r").y)>0.06?"bad":null,cues:{bad:"Your hips are twisting. Keep them level"},fix:"Keep both hips at the same height. Squeeze your stomach and spread your feet a little wider for balance."}
   ]},
- lunge:{name:"Lunges",sub:"Side view",view:"side",need:[11,23,25,27,26,28],
-  tips:["Put the camera at hip height, 2 to 3 metres away.","Turn sideways so the camera sees you step forward.","Your whole body including both feet must be in the picture."],
-  key:P=>Math.min(ang(P.H,P.K,P.A),ang(P.H2,P.K2,P.A2)),keyName:"Front knee angle",
-  rep:{start:v=>v<140,end:v=>v>160,track:"min",goodDepth:v=>v<=105,depthCue:"Go lower. Bring your back knee toward the floor",depthFix:"Lower until both knees bend to about 90 degrees, with the back knee just above the floor."},
+ lunge:{name:"Lunges",sub:"Any angle",need:[11,23,25,27,26,28],
+  tips:["Put the camera at hip height, 2 to 3 metres away.","Any angle works. Side-on checks your front knee position best, facing the camera checks if the knee caves in.","Your whole body including both feet must be in the picture."],
+  key:P=>Math.min(P.ang("H","K","A").l,P.ang("H","K","A").r),keyName:"Front knee angle",
+  rep:{dir:"down",drop:24,back:12,ok:v=>v<=105,depthLabel:"Full depth on each rep",depthCue:"Go lower. Bring your back knee toward the floor",depthFix:"Lower until both knees bend to about 90 degrees, with the back knee just above the floor."},
   rules:[
-   {id:"tall",label:"Upper body tall",segs:[["S","H"]],onlyDown:true,check:P=>tiltFromVertical(P.S,P.H)>25?"bad":null,cues:{bad:"Stay tall. Keep your chest up"},fix:"Keep your shoulders stacked over your hips the whole time."},
-   {id:"knee",label:"Front knee behind your toes",segs:[["K","A"],["K2","A2"]],onlyDown:true,check:P=>{
-      const dir=Math.sign(P.Nose.x-P.Ear.x)||1;const fA=(P.A.x-P.A2.x)*dir>0;const K=fA?P.K:P.K2,T=fA?P.T:P.T2,A=fA?P.A:P.A2;
-      return (K.x-T.x)*dir>0.25*dist(K,A)?"bad":null},cues:{bad:"Front knee is too far forward. Take a longer step"},fix:"Take a longer step so your front knee stays above your ankle, not past your toes."}
+   {id:"tall",label:"Upper body tall",segs:[["S","H"]],onlyDown:true,check:P=>fromVertical(P.m("S"),P.m("H"))>25?"bad":null,cues:{bad:"Stay tall. Keep your chest up"},fix:"Keep your shoulders stacked over your hips the whole time."},
+   {id:"knee",label:"Front knee behind your toes",segs:[["K","T"]],onlyDown:true,check:P=>{
+      const f=V(P.m("Ear"),P.w[0]);f[1]=0;const fn=nrm(f)||1;f[0]/=fn;f[2]/=fn;
+      const s=dot(V(P.g("A","r"),P.g("A","l")),f)>0?"l":"r";
+      return dot(V(P.g("T",s),P.g("K",s)),f)>0.06?"bad":null},cues:{bad:"Front knee is too far forward. Take a longer step"},fix:"Take a longer step so your front knee stays above your ankle, not past your toes."},
+   {id:"cave",label:"Front knee not caving in",segs:[["H","K"],["K","A"]],onlyDown:true,front:true,check:P=>{
+      const s=P.ang("H","K","A").l<P.ang("H","K","A").r?"l":"r";const H=P.g("H",s),K=P.g("K",s),A=P.g("A",s);
+      const t=(K.y-H.y)/((A.y-H.y)||1),lx=H.x+t*(A.x-H.x);return Math.abs(K.x)<Math.abs(lx)-0.05?"bad":null},cues:{bad:"Front knee is caving in. Push it out over your toes"},fix:"Keep your front knee pointing over your second toe. Squeeze the glute of your front leg."}
   ]},
- bridge:{name:"Glute bridge",sub:"Side view",view:"side",need:[11,23,25,27],
-  tips:["Put the camera on the floor, 2 to 3 metres away.","Lie on your back side-on to the camera.","Shoulders, hips, knees and feet must all be in the picture."],
-  key:P=>ang(P.S,P.H,P.K),keyName:"Hip angle",
-  rep:{start:v=>v>150,end:v=>v<140,track:"max",goodDepth:v=>v>=165,depthCue:"Lift your hips higher and squeeze your glutes",depthFix:"Push through your heels and lift until your shoulders, hips and knees form a straight line. Squeeze your glutes for 2 seconds at the top."},
+ bridge:{name:"Glute bridge",sub:"Any angle",need:[11,23,25,27],
+  tips:["Put the camera on the floor, 2 to 3 metres away.","Side-on shows how high your hips go. Facing your feet toward the camera checks your knees.","Shoulders, hips, knees and feet must all be in the picture."],
+  key:P=>P.ang("S","H","K").avg,keyName:"Hip angle",
+  rep:{dir:"up",drop:22,back:10,ok:v=>v>=165,depthLabel:"Hips fully up on each rep",depthCue:"Lift your hips higher and squeeze your glutes",depthFix:"Push through your heels and lift until your shoulders, hips and knees form a straight line. Squeeze your glutes for 2 seconds at the top."},
   rules:[
-   {id:"arch",label:"No arching at the top",segs:[["S","H"],["H","K"]],onlyDown:true,check:P=>offLine(P.H,P.S,P.K)<-0.08?"bad":null,cues:{bad:"Don't arch your back. Stop when your body is straight"},fix:"Stop when your body is in a straight line. Tuck your tailbone before you lift so your glutes do the work, not your lower back."},
-   {id:"feet",label:"Heels close to your body",segs:[["K","A"]],onlyDown:true,check:P=>ang(P.H,P.K,P.A)>115?"bad":null,cues:{bad:"Bring your heels closer to your body"},fix:"Put your heels about a hand-length from your glutes so your knees bend to about 90 degrees at the top."}
+   {id:"arch",label:"No arching at the top",segs:[["S","H"],["H","K"]],onlyDown:true,check:P=>{const o=lineOff(P.m("H"),P.m("S"),P.m("K"));return o.dy<-0.07?"bad":null},cues:{bad:"Don't arch your back. Stop when your body is straight"},fix:"Stop when your body is in a straight line. Tuck your tailbone before you lift so your glutes do the work, not your lower back."},
+   {id:"feet",label:"Heels close to your body",segs:[["K","A"]],onlyDown:true,check:P=>P.ang("H","K","A").avg>115?"bad":null,cues:{bad:"Bring your heels closer to your body"},fix:"Put your heels about a hand-length from your glutes so your knees bend to about 90 degrees at the top."},
+   {id:"kneew",label:"Knees in line with hips",segs:[["H","K"]],onlyDown:true,front:true,check:P=>{const r=dist3(P.g("K","l"),P.g("K","r"))/(dist3(P.g("H","l"),P.g("H","r"))||1);return r<0.7?"in":r>1.8?"out":null},cues:{in:"Knees are falling in. Keep them hip-width apart",out:"Knees are falling out. Keep them hip-width apart"},fix:"Keep your knees in line with your hips the whole time. Squeezing a pillow between your knees helps."}
   ]}
 };
 
-/* Session: feed it landmarks frame by frame; it returns what to show. */
+const VIEW_NAMES={front:"Front view",side:"Side view",angled:"Angled view"};
+
+/* Session: feed it image + 3D landmarks each frame; it returns what to show. */
 function Session(exKey){
-  this.ex=EXERCISES[exKey];this.key=exKey;this.reps=[];this.inRep=false;this.cur=null;this.bad={};this.goodMs=0;this.badMs=0;this.faultMs={};this.lastT=null;this.smooth=null;this.lastKey=null;
+  this.ex=EXERCISES[exKey];this.key=exKey;this.reps=[];this.inRep=false;this.cur=null;this.bad={};
+  this.goodMs=0;this.badMs=0;this.faultMs={};this.lastT=null;this.sw=null;this.si=null;this.sig=null;this.ref=null;this.views={};this.viewS=null;
 }
-Session.prototype.feed=function(lm,t){
-  const ex=this.ex,out={visible:true,rules:{},cue:null,cueType:"info",event:null,key:null,badSegs:[],side:null};
-  const vis=ex.need.every(i=>{const L=lm[i],R=lm[i%2?i+1:i-1];return Math.max(L.visibility??1,(R&&R.visibility)??1)>0.5});
-  if(this.smooth){for(let i=0;i<lm.length;i++){const s=this.smooth[i],p=lm[i];s.x+= .55*(p.x-s.x);s.y+=.55*(p.y-s.y);s.visibility=p.visibility}}
-  else this.smooth=lm.map(p=>({x:p.x,y:p.y,visibility:p.visibility}));
+function ema(prev,next,a){if(!prev)return next.map(p=>({x:p.x,y:p.y,z:p.z||0,visibility:p.visibility}));for(let i=0;i<next.length;i++){const s=prev[i],p=next[i];s.x+=a*(p.x-s.x);s.y+=a*(p.y-s.y);s.z+=a*((p.z||0)-s.z);s.visibility=p.visibility}return prev}
+Session.prototype.feed=function(img,world,t){
+  const ex=this.ex,out={visible:true,rules:{},cue:null,cueType:"info",event:null,key:null,badSegs:[],view:null};
+  this.si=ema(this.si,img,.55);this.sw=ema(this.sw,world||img,.5);
   const dt=this.lastT==null?0:Math.min(200,t-this.lastT);this.lastT=t;
+  const vis=ex.need.every(i=>{const o=i%2?i+1:i-1;const v=Math.max(img[i].visibility??1,img[o].visibility??1);const p=img[i];return v>0.5&&p.x>-0.05&&p.x<1.05&&p.y>-0.05&&p.y<1.05});
   if(!vis){out.visible=false;out.cue="Move back so your whole body is in the picture";for(const r of ex.rules)this.bad[r.id]=0;return out}
-  const side=pickSide(this.smooth);out.side=side;
-  const P=pts(this.smooth,side),front=facingCamera(P);
-  if(ex.view==="side"&&front){out.cue="Turn sideways to the camera";out.cueType="info";return out}
-  const k=ex.key(P);out.key=k;
-  let down=false;
+  /* copy image visibility onto 3D points */
+  for(let i=0;i<this.sw.length;i++)this.sw[i].visibility=this.si[i].visibility;
+  const P=makeP(this.sw,this.si);
+  this.viewS=this.viewS==null?P.front:this.viewS+.15*(P.front-this.viewS);
+  const view=this.viewS>.72?"front":this.viewS<.4?"side":"angled";out.view=view;this.views[view]=(this.views[view]||0)+1;
+  const raw=ex.key(P);this.sig=this.sig==null?raw:this.sig+.5*(raw-this.sig);const k=this.sig;out.key=k;
+
+  /* rep counting: follows your own top position instead of a fixed angle */
   if(ex.rep){
-    const r=ex.rep;
-    if(!this.inRep&&r.start(k)){this.inRep=true;this.cur={ext:k,frames:0,faults:{},t0:t}}
-    if(this.inRep){down=true;this.cur.frames++;this.cur.ext=r.track==="min"?Math.min(this.cur.ext,k):Math.max(this.cur.ext,k)}
-  }else down=true;
+    const r=ex.rep,down=r.dir==="down";
+    if(this.ref==null)this.ref=k;
+    if(!this.inRep){
+      this.ref=down?Math.max(k,this.ref-0.12):Math.min(k,this.ref+0.12);
+      if(down?k<this.ref-r.drop:k>this.ref+r.drop){this.inRep=true;this.cur={ext:k,frames:0,faults:{},t0:t,ref:this.ref}}
+    }
+    if(this.inRep){
+      const c=this.cur;c.frames++;c.ext=down?Math.min(c.ext,k):Math.max(c.ext,k);
+      if(down?k>c.ref-r.back:k<c.ref+r.back){
+        this.inRep=false;this.ref=k;
+        if(t-c.t0>=350&&c.frames>=5){
+          const mistakes=[];for(const id in c.faults){if(c.faults[id]>=Math.max(4,c.frames*0.15))mistakes.push(id)}
+          if(!r.ok(c.ext))mistakes.push("depth");
+          const rep={n:this.reps.length+1,good:!mistakes.length,mistakes,ext:Math.round(c.ext),view};this.reps.push(rep);out.event=rep;
+        }
+      }
+    }
+  }
+  const active=ex.rep?this.inRep:true;
   let worst=null;
   for(const rule of ex.rules){
-    if(rule.sideOnly&&front){out.rules[rule.id]="na";continue}
-    if(rule.frontOnly&&!front){out.rules[rule.id]="na";continue}
-    if(rule.onlyDown&&!down){out.rules[rule.id]="idle";this.bad[rule.id]=0;continue}
+    if(rule.front&&view==="side"){out.rules[rule.id]="na";this.bad[rule.id]=0;continue}
+    if(rule.onlyDown&&!active){out.rules[rule.id]="idle";this.bad[rule.id]=0;continue}
     const res=rule.check(P);
     if(res){this.bad[rule.id]=(this.bad[rule.id]||0)+1;
-      if(this.bad[rule.id]>=6){out.rules[rule.id]="bad";out.badSegs.push(...rule.segs);if(!worst||this.bad[rule.id]>worst.n)worst={rule,res,n:this.bad[rule.id]}}
+      if(this.bad[rule.id]>=5){out.rules[rule.id]="bad";out.badSegs.push(...rule.segs);if(!worst||this.bad[rule.id]>worst.n)worst={rule,res,n:this.bad[rule.id]}}
       else out.rules[rule.id]="ok";
       if(this.inRep)this.cur.faults[rule.id]=(this.cur.faults[rule.id]||0)+1;
     }else{this.bad[rule.id]=0;out.rules[rule.id]="ok"}
@@ -307,23 +363,13 @@ Session.prototype.feed=function(lm,t){
   else if(ex.timed){out.cue="Good form. Hold it";out.cueType="good"}
   else if(this.inRep){out.cue="Good form. Keep going";out.cueType="good"}
   else{out.cue=this.reps.length?"Ready for the next rep":"Start when you are ready";out.cueType="info"}
-  if(ex.rep&&this.inRep&&ex.rep.end(k)){
-    const c=this.cur;this.inRep=false;
-    if(c.frames>=6){
-      const mistakes=[];
-      for(const id in c.faults){if(c.faults[id]>=Math.max(5,c.frames*0.25))mistakes.push(id)}
-      if(!ex.rep.goodDepth(c.ext))mistakes.push("depth");
-      const rep={n:this.reps.length+1,good:!mistakes.length,mistakes,ext:Math.round(c.ext)};
-      this.reps.push(rep);out.event=rep;
-    }
-  }
   return out;
 };
 Session.prototype.mistakeInfo=function(id){
   const ex=this.ex;if(id==="depth")return{label:ex.rep.depthCue.split(".")[0],fix:ex.rep.depthFix};
-  const r=ex.rules.find(x=>x.id===id);return{label:r.label,fix:r.fix,cue:Object.values(r.cues)[0]};
+  const r=ex.rules.find(x=>x.id===id);return{label:r.label,fix:r.fix};
 };
-if(typeof module!=="undefined")module.exports={EXERCISES,Session,ang};
+if(typeof module!=="undefined")module.exports={EXERCISES,Session,ang3,makeP};
 </script>
 
 <script>
@@ -396,7 +442,7 @@ $("startBtn").onclick=async()=>{
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showErr("This browser can't open the camera here. Open this file in Chrome on a laptop, or from an https link on your phone.");return}
   say("",0,true);
   $("setup").hidden=true;$("summary").hidden=true;$("live").hidden=false;$("loading").hidden=false;
-  startSession();
+  startSession();shownView=null;$("viewChip").textContent="Finding you";$("viewHint").textContent="";
   try{await openCamera()}catch(e){backToSetup();showErr(e&&e.name==="NotAllowedError"?"Camera permission was blocked. Allow the camera for this page in your browser settings, then press Start again.":"Couldn't open the camera: "+(e&&e.message||e));return}
   try{await loadModel()}catch(e){backToSetup();showErr("Couldn't load body tracking. Check your internet connection and try again.");return}
   $("loading").hidden=true;running=true;requestAnimationFrame(loop);
@@ -407,25 +453,30 @@ function startSession(){
   $("goodN").parentElement.hidden=!!ex.timed;
   $("repLog").innerHTML='<li class="note">'+(ex.timed?"Hold the plank. Only time with good form counts.":"Reps appear here as you do them.")+"</li>";
   const rl=$("ruleList");rl.innerHTML="";
-  const rows=ex.rules.map(r=>({id:r.id,label:r.label}));if(ex.rep)rows.push({id:"depth",label:ex.rep.depthCue.split(".")[0]==="Go lower"?"Full depth on each rep":"Full range on each rep"});
-  rows.forEach(r=>{const li=document.createElement("li");li.id="rule-"+r.id;li.innerHTML='<span class="dot"></span><span></span>';li.lastChild.textContent=r.label;rl.appendChild(li)});
+  const rows=ex.rules.map(r=>({id:r.id,label:r.label}));if(ex.rep)rows.push({id:"depth",label:ex.rep.depthLabel});
+  rows.forEach(r=>{const li=document.createElement("li");li.id="rule-"+r.id;li.innerHTML='<span class="dot"></span><span class="lbl"></span>';li.lastChild.textContent=r.label;rl.appendChild(li)});
   setCue("Get into position","info");
 }
 function setCue(t,type){const c=$("cue");if(c.textContent!==t)c.textContent=t;c.className="cue "+type}
 function backToSetup(){running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$("live").hidden=true;$("summary").hidden=true;$("setup").hidden=false}
 
 const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[27,29],[28,30],[7,11],[8,12]];
-function segIdx(side,name){const l=side==="l";return {S:l?11:12,E:l?13:14,W:l?15:16,H:l?23:24,K:l?25:26,A:l?27:28,T:l?31:32,Ear:l?7:8,H2:l?24:23,K2:l?26:25,A2:l?28:27}[name]}
+const JI={S:[11,12],E:[13,14],W:[15,16],H:[23,24],K:[25,26],A:[27,28],He:[29,30],T:[31,32],Ear:[7,8]};
 function draw(lm,res){
   const c=$("overlay"),x=c.getContext("2d"),W=c.width,H=c.height;x.clearRect(0,0,W,H);if(!lm)return;
-  const bad=new Set();(res.badSegs||[]).forEach(([a,b])=>{const i=segIdx(res.side,a),j=segIdx(res.side,b);bad.add(i+"-"+j);bad.add(j+"-"+i)});
   const lw=Math.max(4,W/180);x.lineCap="round";
-  BONES.forEach(([i,j])=>{const a=lm[i],b=lm[j];if((a.visibility??1)<.4||(b.visibility??1)<.4)return;
-    const isBad=bad.has(i+"-"+j);x.strokeStyle=isBad?"#FF4D36":res.visible?"#4FD38A":"#BBBBBB";x.lineWidth=isBad?lw*1.8:lw;
-    x.beginPath();x.moveTo(a.x*W,a.y*H);x.lineTo(b.x*W,b.y*H);x.stroke()});
-  (res.badSegs||[]).forEach(([a,b])=>{const i=segIdx(res.side,a),j=segIdx(res.side,b);if(i==null||j==null)return;const A=lm[i],B=lm[j];
-    x.strokeStyle="#FF4D36";x.lineWidth=lw*1.8;x.beginPath();x.moveTo(A.x*W,A.y*H);x.lineTo(B.x*W,B.y*H);x.stroke()});
-  [0,11,12,13,14,15,16,23,24,25,26,27,28].forEach(i=>{const p=lm[i];if((p.visibility??1)<.4)return;x.fillStyle="#fff";x.beginPath();x.arc(p.x*W,p.y*H,lw*.9,0,Math.PI*2);x.fill()});
+  const line=(a,b,col,w)=>{if((a.visibility??1)<.35||(b.visibility??1)<.35)return;x.strokeStyle=col;x.lineWidth=w;x.beginPath();x.moveTo(a.x*W,a.y*H);x.lineTo(b.x*W,b.y*H);x.stroke()};
+  BONES.forEach(([i,j])=>line(lm[i],lm[j],res.visible?"#4FD38A":"#BBBBBB",lw));
+  (res.badSegs||[]).forEach(([a,b])=>{
+    if(a===b){line(lm[JI[a][0]],lm[JI[a][1]],"#FF4D36",lw*1.8);return}
+    for(let s=0;s<2;s++)line(lm[JI[a][s]],lm[JI[b][s]],"#FF4D36",lw*1.8)});
+  [0,11,12,13,14,15,16,23,24,25,26,27,28].forEach(i=>{const p=lm[i];if((p.visibility??1)<.35)return;x.fillStyle="#fff";x.beginPath();x.arc(p.x*W,p.y*H,lw*.9,0,Math.PI*2);x.fill()});
+}
+let shownView=null;
+function showView(v){
+  if(!v||v===shownView)return;shownView=v;$("viewChip").textContent=VIEW_NAMES[v];
+  const hasFront=session.ex.rules.some(r=>r.front);
+  $("viewHint").textContent=v==="side"?(hasFront?"Side view: depth, body line and posture are checked. Turn to face the camera to also check left and right balance.":"Side view: all checks are on."):v==="front"?"Front view: all checks are on, including left and right balance.":"Angled view: all checks are on.";
 }
 function fmt(ms){const s=Math.floor(ms/1000);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
 
@@ -435,11 +486,11 @@ function loop(){
   if(v.readyState>=2&&v.currentTime!==lastVideoT){
     lastVideoT=v.currentTime;const now=performance.now();
     let r=null;try{r=landmarker.detectForVideo(v,now)}catch(e){}
-    const lm=r&&r.landmarks&&r.landmarks[0];
+    const lm=r&&r.landmarks&&r.landmarks[0];const wl=r&&r.worldLandmarks&&r.worldLandmarks[0];
     if(!lm){draw(null,{});setCue("Step into the picture so the camera can see you","info");for(const k in session.bad)session.bad[k]=0}
     else{
-      const res=session.feed(lm,now);draw(session.smooth,res);
-      for(const id in res.rules){const li=$("rule-"+id);if(!li)continue;const st=res.rules[id];li.className=st==="bad"?"bad":"";li.firstChild.className="dot"+(st==="bad"?" bad":st==="ok"?" ok":"")}
+      const res=session.feed(lm,wl,now);draw(session.si,res);showView(res.view);
+      for(const id in res.rules){const li=$("rule-"+id);if(!li)continue;const st=res.rules[id];li.className=st==="bad"?"bad":st==="na"?"na":"";li.firstChild.className="dot"+(st==="bad"?" bad":st==="ok"?" ok":"")}
       setCue(res.cue,res.cueType);
       if(res.cueType==="bad"){if(res.cueId!==lastCueId){lastCueId=res.cueId;cueSince=now}if(now-cueSince>500)say(res.cue,res.cueId)}else lastCueId=null;
       if(res.cue&&!res.visible)say(res.cue,"vis");
@@ -478,6 +529,8 @@ function showSummary(){
   session.reps.forEach(r=>r.mistakes.forEach(x=>m[x]=(m[x]||0)+1));
   if(ex.timed)for(const id in session.faultMs)if(session.faultMs[id]>1500)m[id]=session.faultMs[id];
   const out=$("sumMistakes");out.innerHTML="";
+  const seen=Object.keys(session.views||{}).filter(k=>session.views[k]>15).map(k=>VIEW_NAMES[k].toLowerCase());
+  if(seen.length){const p=document.createElement("p");p.className="note";p.textContent="Checked from: "+seen.join(", ")+"."+(!seen.includes("front view")&&!seen.includes("angled view")&&session.ex.rules.some(r=>r.front)?" Do a set facing the camera to also check left and right balance.":"");out.appendChild(p)}
   const list=Object.entries(m).sort((a,b)=>b[1]-a[1]);
   if(!list.length){
     const d=document.createElement("div");d.className="allgood";
